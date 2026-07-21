@@ -76,11 +76,17 @@ VIEWS: list[tuple[str, str]] = [
 # the "F1" characters in the wordmark and the soft tire compound in the charts —
 # plus the deliberate red error-state styling. No other reds, no extra gradients.
 # ---------------------------------------------------------------------------
+#
+# NOTE: this MUST be a single <style> block. Streamlit renders st.markdown text
+# through a Markdown parser first; a leading <link> tag (or anything before
+# <style>) starts an HTML block that Markdown ends at the first blank line —
+# which lands inside the CSS and dumps the rest as literal text on the page. A
+# lone <style> block is passed through verbatim until </style>, so the fonts are
+# loaded via @import inside it rather than with <link> tags.
 _HEAD = """
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@1&display=swap" rel="stylesheet">
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@1&display=swap');
+
   /* ---- Hide Streamlit default chrome ---- */
   #MainMenu { visibility: hidden; }
   footer { visibility: hidden; }
