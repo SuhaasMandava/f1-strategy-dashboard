@@ -39,14 +39,18 @@ from utils.data_loader import (
     SESSION_TYPES,
     DataLoadError,
     available_years,
+    delta_summary,
     driver_list,
     enable_cache,
     event_names,
     lap_time_delta,
+    lap_time_summary,
     lap_times,
     load_session,
+    pit_stop_summary,
     pit_stops,
     stint_summary,
+    tire_strategy_summary,
 )
 
 st.set_page_config(
@@ -176,6 +180,20 @@ _HEAD = """
     font-size: 0.9rem; font-weight: 600; color: #ededed; letter-spacing: 0.01em;
     margin: 0 0 1rem;
   }
+
+  /* ---- Per-chart "what it shows" + dynamic summary ---- */
+  .chart-what { font-size: 0.9rem; color: #8a8a8a; line-height: 1.65; margin: 1.2rem 0 1rem; }
+  .chart-summary {
+    border: 1px solid #1f1f1f; background: #101010; border-radius: 10px;
+    padding: 0.9rem 1.15rem;
+  }
+  .chart-summary-head {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    text-transform: uppercase; letter-spacing: 0.13em; font-size: 0.66rem;
+    color: #737373; margin: 0 0 0.55rem;
+  }
+  .chart-summary ul { margin: 0; padding-left: 1.15rem; }
+  .chart-summary li { color: #c4c4c4; font-size: 0.9rem; line-height: 1.7; margin-bottom: 0.15rem; }
 
   /* ---- Buttons (sidebar load etc.): plain bordered chips, no fill ---- */
   .stButton > button {
@@ -318,6 +336,45 @@ def card_title(text: str) -> None:
     st.markdown(f'<div class="card-title">{text}</div>', unsafe_allow_html=True)
 
 
+# Plain-terms "what this chart shows" copy, paired with a dynamic summary that's
+# computed from the data currently plotted (see utils.data_loader.*_summary).
+_CHART_WHAT = {
+    "lap-times": (
+        "Each line is one driver's lap time on every lap — lower is faster. Watch "
+        "for spikes on pit laps, the drop onto fresh tires afterwards, and the "
+        "gradual climb as tires wear."
+    ),
+    "tire-strategy": (
+        "Each row is a driver and each colored bar is a stint on one set of tires "
+        "between pit stops. Bar length is how many laps that set lasted; the color "
+        "is the compound."
+    ),
+    "pit-stops": (
+        "Each bar is a single pit stop's total time in the pit lane — shorter is "
+        "better. The table below lists every stop and the lap it happened on."
+    ),
+    "undercut-overcut": (
+        "Each bar is how much faster or slower Driver A was than Driver B on that "
+        "lap. Green (below the line) means A gained time; red (above) means A lost "
+        "it — the swing right after a stop is where an undercut pays off."
+    ),
+}
+
+
+def chart_notes(view: str, facts: list[str]) -> None:
+    """Render the plain-terms explanation and a dynamic summary under a chart."""
+    st.markdown(
+        f'<div class="chart-what">{_CHART_WHAT[view]}</div>', unsafe_allow_html=True
+    )
+    if facts:
+        items = "".join(f"<li>{fact}</li>" for fact in facts)
+        st.markdown(
+            '<div class="chart-summary"><div class="chart-summary-head">'
+            f"Summary of this chart</div><ul>{items}</ul></div>",
+            unsafe_allow_html=True,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Sidebar + session loading (functional logic unchanged)
 # ---------------------------------------------------------------------------
@@ -413,6 +470,7 @@ def render_lap_times(session) -> None:
             charts.lap_time_chart(lap_times(session, chosen)),
             use_container_width=True,
         )
+        chart_notes("lap-times", lap_time_summary(session, chosen))
 
 
 def render_tire_strategy(session) -> None:
@@ -430,10 +488,7 @@ def render_tire_strategy(session) -> None:
     with st.container(border=True):
         card_title("Stint timeline")
         st.plotly_chart(charts.tire_strategy_chart(df), use_container_width=True)
-        st.caption(
-            "Each bar is a stint between pit stops. Colors follow the official F1 "
-            "tire compounds."
-        )
+        chart_notes("tire-strategy", tire_strategy_summary(session))
 
 
 def render_pit_stops(session) -> None:
@@ -462,6 +517,7 @@ def render_pit_stops(session) -> None:
             use_container_width=True,
             hide_index=True,
         )
+        chart_notes("pit-stops", pit_stop_summary(session))
         st.caption(
             "Pit-lane time is derived as PitOutTime(next lap) − PitInTime(in-lap): "
             "the total time spent in the pit lane, not just stationary service time."
@@ -503,12 +559,7 @@ def render_undercut_overcut(session) -> None:
         st.plotly_chart(
             charts.delta_chart(df, driver_a, driver_b), use_container_width=True
         )
-        st.caption(
-            f"Δ = lap time of {driver_a} minus {driver_b}. Green bars (below zero) "
-            f"are laps {driver_a} gained; red bars are laps lost. A sharp negative "
-            f"swing right after a stop is the fresh-tire advantage that powers an "
-            f"undercut."
-        )
+        chart_notes("undercut-overcut", delta_summary(session, driver_a, driver_b))
 
 
 VIEW_RENDERERS = {

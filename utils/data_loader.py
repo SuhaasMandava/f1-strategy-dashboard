@@ -338,3 +338,118 @@ def lap_time_delta(session, driver_a: str, driver_b: str) -> pd.DataFrame:
     return merged[["LapNumber", "DeltaSeconds", "CumulativeDelta"]].reset_index(
         drop=True
     )
+
+
+# ---------------------------------------------------------------------------
+# Plain-language summaries
+#
+# Each summary function reads the *same* shaped data the matching chart plots,
+# so its output tracks the current selection (e.g. only the chosen drivers). It
+# returns a list of short human-readable sentences the UI renders as bullets, or
+# an empty list when there's nothing to summarise.
+# ---------------------------------------------------------------------------
+def _fmt_time(seconds: float) -> str:
+    """Render a lap time in seconds as ``m:ss.mmm`` (e.g. 92.456 -> ``1:32.456``)."""
+    if pd.isna(seconds):
+        return "—"
+    minutes, secs = divmod(float(seconds), 60)
+    return f"{int(minutes)}:{secs:06.3f}"
+
+
+def lap_time_summary(session, drivers: list[str]) -> list[str]:
+    """Summarise the lap-time chart for the currently selected drivers."""
+    df = lap_times(session, drivers)
+    if df.empty:
+        return []
+
+    fastest = df.loc[df["LapTimeSeconds"].idxmin()]
+    per_driver = (
+        df.groupby("Driver")["LapTimeSeconds"]
+        .agg(["mean", "min", "count"])
+        .sort_values("mean")
+    )
+
+    facts = [
+        f"Comparing {len(per_driver)} "
+        f"{'driver' if len(per_driver) == 1 else 'drivers'} over "
+        f"{int(df['LapNumber'].nunique())} laps.",
+        f"Fastest lap: {fastest['Driver']} {_fmt_time(fastest['LapTimeSeconds'])} "
+        f"on lap {int(fastest['LapNumber'])}.",
+    ]
+    best_avg = per_driver.index[0]
+    facts.append(
+        f"Best average pace: {best_avg} "
+        f"({_fmt_time(per_driver.loc[best_avg, 'mean'])} per lap)."
+    )
+    bests = ", ".join(
+        f"{driver} {_fmt_time(row['min'])}"
+        for driver, row in per_driver.sort_values("min").iterrows()
+    )
+    facts.append(f"Best lap each: {bests}.")
+    return facts
+
+
+def tire_strategy_summary(session) -> list[str]:
+    """Summarise the tire-strategy chart (stints, compounds, stops)."""
+    df = stint_summary(session)
+    if df.empty:
+        return []
+
+    n_drivers = df["Driver"].nunique()
+    stops_per_driver = df.groupby("Driver")["Stint"].nunique() - 1
+    common_stops = int(stops_per_driver.clip(lower=0).mode().iloc[0])
+    compounds = ", ".join(
+        c.title() for c in sorted(df["Compound"].unique())
+    )
+    longest = df.loc[df["Laps"].idxmax()]
+
+    return [
+        f"{n_drivers} drivers; most ran a {common_stops}-stop race.",
+        f"Compounds used: {compounds}.",
+        f"Longest stint: {longest['Driver']}, {int(longest['Laps'])} laps on "
+        f"{longest['Compound'].title()}.",
+    ]
+
+
+def pit_stop_summary(session) -> list[str]:
+    """Summarise the pit-stop chart (count, fastest, average)."""
+    df = pit_stops(session)
+    if df.empty:
+        return []
+
+    fastest = df.loc[df["PitDurationSeconds"].idxmin()]
+    return [
+        f"{len(df)} stops across {df['Driver'].nunique()} drivers.",
+        f"Fastest: {fastest['Driver']} {fastest['PitDurationSeconds']:.1f}s "
+        f"on lap {int(fastest['Lap'])}.",
+        f"Average pit-lane time: {df['PitDurationSeconds'].mean():.1f}s.",
+    ]
+
+
+def delta_summary(session, driver_a: str, driver_b: str) -> list[str]:
+    """Summarise the head-to-head delta between two drivers."""
+    df = lap_time_delta(session, driver_a, driver_b)
+    if df.empty:
+        return []
+
+    a_faster = int((df["DeltaSeconds"] < 0).sum())
+    b_faster = int((df["DeltaSeconds"] > 0).sum())
+    net = float(df["CumulativeDelta"].iloc[-1])
+
+    facts = [
+        f"Compared over {len(df)} shared laps.",
+        f"{driver_a} quicker on {a_faster} laps, {driver_b} on {b_faster}.",
+    ]
+    if net < 0:
+        facts.append(
+            f"Net: {driver_a} gained {abs(net):.1f}s in total lap time — the "
+            f"faster car across these laps."
+        )
+    elif net > 0:
+        facts.append(
+            f"Net: {driver_b} gained {abs(net):.1f}s in total lap time — the "
+            f"faster car across these laps."
+        )
+    else:
+        facts.append("Net: dead even on cumulative lap time.")
+    return facts
