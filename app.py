@@ -49,6 +49,8 @@ from utils.data_loader import (
     load_session,
     pit_stop_summary,
     pit_stops,
+    race_highlights,
+    race_results,
     stint_summary,
     tire_strategy_summary,
 )
@@ -65,6 +67,7 @@ enable_cache()
 # The four views, in nav order: (slug, nav label). The slug is the session_state
 # value and the eyebrow name; it maps to a render function in VIEW_RENDERERS.
 VIEWS: list[tuple[str, str]] = [
+    ("race-summary", "Race Summary"),
     ("lap-times", "Lap Times"),
     ("tire-strategy", "Tire Strategy"),
     ("pit-stops", "Pit Stops"),
@@ -195,6 +198,23 @@ _HEAD = """
   .chart-summary ul { margin: 0; padding-left: 1.15rem; }
   .chart-summary li { color: #c4c4c4; font-size: 0.9rem; line-height: 1.7; margin-bottom: 0.15rem; }
 
+  /* ---- Race Summary highlight cards ---- */
+  .hl-grid { display: flex; gap: 1rem; flex-wrap: wrap; margin: 0.3rem 0 1.5rem; }
+  .hl-card {
+    flex: 1 1 150px; border: 1px solid #262626; border-radius: 12px;
+    background: linear-gradient(180deg, #161616 0%, #121212 100%); padding: 1.15rem 1.25rem;
+  }
+  .hl-label {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    text-transform: uppercase; letter-spacing: 0.11em; font-size: 0.64rem;
+    color: #737373; margin-bottom: 0.55rem;
+  }
+  .hl-driver {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 1.6rem; font-weight: 600; color: #f5f5f5; line-height: 1;
+  }
+  .hl-detail { font-size: 0.8rem; color: #8a8a8a; margin-top: 0.45rem; }
+
   /* ---- Buttons (sidebar load etc.): plain bordered chips, no fill ---- */
   .stButton > button {
     border: 1px solid #262626; border-radius: 8px; background: #141414;
@@ -253,7 +273,7 @@ def render_topbar(active_view: str) -> None:
     its ``st-key-*`` class gets the underline styling. Clicking sets the view and
     reruns (session_state is preserved — no reload).
     """
-    left, right = st.columns([1.5, 2.5], vertical_alignment="center")
+    left, right = st.columns([1, 3], vertical_alignment="center")
     with left:
         st.markdown(
             '<div class="app-header"><span class="wm-dot"></span>'
@@ -262,7 +282,7 @@ def render_topbar(active_view: str) -> None:
             unsafe_allow_html=True,
         )
     with right:
-        nav_cols = st.columns(len(VIEWS), gap="medium")
+        nav_cols = st.columns(len(VIEWS), gap="small")
         for col, (slug, label) in zip(nav_cols, VIEWS):
             with col:
                 key = f"navon-{slug}" if slug == active_view else f"nav-{slug}"
@@ -445,6 +465,93 @@ def _default_drivers(drivers: list[str], count: int = 2) -> list[str]:
     return chosen[:count]
 
 
+def _highlight_cards_html(highlights: dict) -> str:
+    """Build the row of Winner / Fastest lap / Most gained / Most lost cards."""
+    fields = [
+        ("winner", "Winner"),
+        ("fastest_lap", "Fastest lap"),
+        ("most_gained", "Most places gained"),
+        ("most_lost", "Most places lost"),
+    ]
+    cards = []
+    for key, label in fields:
+        item = highlights.get(key)
+        if not item:
+            continue
+        detail = f'<div class="hl-detail">{item["detail"]}</div>' if item.get("detail") else ""
+        cards.append(
+            f'<div class="hl-card"><div class="hl-label">{label}</div>'
+            f'<div class="hl-driver">{item["driver"]}</div>{detail}</div>'
+        )
+    return f'<div class="hl-grid">{"".join(cards)}</div>' if cards else ""
+
+
+def _classification_table(results):
+    """Format the tidy results frame for display (readable ints and +/- movement)."""
+    def as_int(value):
+        return int(value) if value == value and value is not None else "—"  # NaN != NaN
+
+    def as_move(value):
+        if value != value or value is None:
+            return "—"
+        value = int(value)
+        return f"+{value}" if value > 0 else str(value)
+
+    return results.assign(
+        Pos=results["Finish"].map(as_int),
+        Grid=results["Grid"].map(as_int),
+        Move=results["Gained"].map(as_move),
+        Points=results["Points"].map(lambda v: int(v) if v == v else 0),
+    )[["Pos", "Driver", "Team", "Grid", "Move", "Status", "Points"]]
+
+
+def render_race_summary(session) -> None:
+    """Race Summary view: headline outcomes, the story, and full classification."""
+    section_header(
+        "race-summary",
+        "Race Summary",
+        "The headline outcomes at a glance — winner, biggest movers, and the story "
+        "of the race.",
+    )
+    highlights = race_highlights(session)
+    results = race_results(session)
+
+    if results.empty and not highlights["fastest_lap"]:
+        st.info(
+            "No classification is available for this session yet — this view is "
+            "most useful for a completed Race."
+        )
+        return
+
+    with st.container(border=True):
+        card_title("Headlines")
+        cards_html = _highlight_cards_html(highlights)
+        if cards_html:
+            st.markdown(cards_html, unsafe_allow_html=True)
+        if highlights["story"]:
+            items = "".join(f"<li>{line}</li>" for line in highlights["story"])
+            st.markdown(
+                '<div class="chart-summary"><div class="chart-summary-head">'
+                f"The story</div><ul>{items}</ul></div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption("Not enough data to build a summary for this session.")
+
+    if not results.empty:
+        with st.container(border=True):
+            card_title("Full classification")
+            st.dataframe(
+                _classification_table(results),
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "Move = places gained (+) or lost (−) from the starting grid to the "
+                "finish."
+            )
+
+
 def render_lap_times(session) -> None:
     """Lap-time line chart with a driver multiselect."""
     section_header(
@@ -563,6 +670,7 @@ def render_undercut_overcut(session) -> None:
 
 
 VIEW_RENDERERS = {
+    "race-summary": render_race_summary,
     "lap-times": render_lap_times,
     "tire-strategy": render_tire_strategy,
     "pit-stops": render_pit_stops,
@@ -604,7 +712,7 @@ def main() -> None:
     inject_head()
     render_sidebar()
 
-    view = st.session_state.setdefault("view", "lap-times")
+    view = st.session_state.setdefault("view", "race-summary")
     session = st.session_state.get("session")
 
     render_topbar(view)
