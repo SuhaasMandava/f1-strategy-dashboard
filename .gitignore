@@ -1,0 +1,25 @@
+# FastF1 on-disk cache — regenerated on demand, never commit it.
+cache/
+
+# Environment / secrets — never commit real credentials.
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.python-version
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

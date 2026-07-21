@@ -1,0 +1,9 @@
+[theme]
+base = "dark"
+backgroundColor = "#0a0a0a"
+secondaryBackgroundColor = "#141414"
+textColor = "#f5f5f5"
+# Neutral light gray — NOT red. Red is reserved exclusively for F1 tire-compound
+# coloring in the charts (and the "F1" wordmark), never for UI chrome.
+primaryColor = "#e5e5e5"
+font = "sans serif"
