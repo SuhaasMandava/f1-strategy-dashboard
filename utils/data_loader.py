@@ -95,6 +95,44 @@ def event_names(year: int) -> list[str]:
     return schedule["EventName"].tolist()
 
 
+def _session_start_utc(year: int, event_name: str, session_label: str):
+    """Scheduled UTC start of a session, or ``None`` if it can't be determined.
+
+    The event schedule lists up to five sessions per weekend as
+    ``Session1..Session5`` (names) with matching ``Session1DateUtc..Session5DateUtc``
+    timestamps. We find the column whose name matches ``session_label`` and return
+    its start time.
+    """
+    try:
+        schedule = load_event_schedule(year)
+        rows = schedule.loc[schedule["EventName"] == event_name]
+        if rows.empty:
+            return None
+        row = rows.iloc[0]
+        for i in range(1, 6):
+            if str(row.get(f"Session{i}")) == session_label:
+                start = row.get(f"Session{i}DateUtc")
+                return start if pd.notna(start) else None
+    except Exception:  # noqa: BLE001 — schedule shape issues just mean "unknown".
+        return None
+    return None
+
+
+def _session_in_future(year: int, event_name: str, session_label: str) -> bool:
+    """True if the session is scheduled but hasn't started yet.
+
+    Returns False when the start time is unknown, so an uncertain case still falls
+    through to a normal load attempt rather than being wrongly blocked.
+    """
+    start = _session_start_utc(year, event_name, session_label)
+    if start is None:
+        return False
+    start = pd.Timestamp(start)
+    if start.tzinfo is None:
+        start = start.tz_localize("UTC")
+    return start > pd.Timestamp.now(tz="UTC")
+
+
 @st.cache_resource(show_spinner=False)
 def load_session(year: int, event_name: str, session_label: str):
     """Load and fully parse a session's lap data, memoized across reruns.
@@ -107,23 +145,46 @@ def load_session(year: int, event_name: str, session_label: str):
     telemetry/weather/messages to keep loads fast and light on the upstream source.
 
     Raises:
-        DataLoadError: with a UI-safe message if the session can't be loaded.
+        DataLoadError: with a UI-safe message if the session can't be loaded —
+        including a clear "hasn't happened yet" message for future sessions.
     """
     identifier = SESSION_TYPES.get(session_label)
     if identifier is None:
         raise DataLoadError(f"Unknown session type: {session_label}.")
 
+    # Fail fast (and clearly) for sessions that haven't run yet — no point hitting
+    # the network for data that can't exist.
+    if _session_in_future(year, event_name, session_label):
+        raise DataLoadError(
+            f"{session_label} for {event_name} {year} hasn't happened yet — "
+            "there's no timing data to show. Check back after the session runs."
+        )
+
     try:
         session = fastf1.get_session(year, event_name, identifier)
         session.load(laps=True, telemetry=False, weather=False, messages=False)
+        # NOTE: `session.laps` is validated *inside* the try. FastF1 raises
+        # DataNotLoadedError on this attribute when the load didn't populate laps
+        # (e.g. a future/unavailable session), so it must be guarded here too.
+        laps = session.laps
+        has_laps = laps is not None and not laps.empty
+    except DataLoadError:
+        raise
     except Exception as exc:  # noqa: BLE001 — normalize any upstream failure.
+        # A late-breaking future check catches sessions whose date we couldn't
+        # read earlier but which still fail because they haven't run.
+        if _session_in_future(year, event_name, session_label):
+            raise DataLoadError(
+                f"{session_label} for {event_name} {year} hasn't happened yet — "
+                "there's no timing data to show. Check back after the session runs."
+            ) from exc
         raise DataLoadError(
             f"Couldn't load {session_label} data for {event_name} {year}. "
             "This session may not exist or the data source may be temporarily "
             "unavailable. Try another session or try again shortly."
         ) from exc
 
-    if session.laps is None or session.laps.empty:
+    if not has_laps:
         raise DataLoadError(
             f"No lap data is available for {session_label} at {event_name} {year}."
         )
