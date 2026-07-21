@@ -514,3 +514,184 @@ def delta_summary(session, driver_a: str, driver_b: str) -> list[str]:
     else:
         facts.append("Net: dead even on cumulative lap time.")
     return facts
+
+
+# ---------------------------------------------------------------------------
+# Race outcome / results
+#
+# ``session.results`` carries the classification (grid + finishing position,
+# status, points). We derive the headline story from it — winner, biggest
+# movers, DNFs — plus the fastest lap from the lap data. Everything is guarded
+# so non-race sessions (or partial data) degrade to whatever is available.
+# ---------------------------------------------------------------------------
+def _is_classified(status) -> bool:
+    """True if a finishing ``Status`` counts as classified (finished/+N laps)."""
+    s = str(status)
+    return s == "Finished" or s.startswith("+")
+
+
+def _fastest_lap(session) -> dict | None:
+    """The single fastest lap of the session: driver, formatted time, lap number."""
+    laps = session.laps
+    if not _has_columns(laps, {"Driver", "LapTime", "LapNumber"}):
+        return None
+    valid = laps.dropna(subset=["LapTime"])
+    if valid.empty:
+        return None
+    row = valid.loc[valid["LapTime"].idxmin()]
+    return {
+        "driver": row["Driver"],
+        "time": _fmt_time(row["LapTime"].total_seconds()),
+        "lap": int(row["LapNumber"]),
+    }
+
+
+def race_results(session) -> pd.DataFrame:
+    """Tidy classification table: one row per driver, ordered by finishing place.
+
+    Columns: ``Driver``, ``Team``, ``Grid``, ``Finish``, ``Gained`` (grid − finish,
+    so positive = places gained), ``Status``, ``Points``. Returns an empty frame
+    if the session exposes no results.
+    """
+    empty = pd.DataFrame(
+        columns=["Driver", "Team", "Grid", "Finish", "Gained", "Status", "Points"]
+    )
+    try:
+        res = session.results
+    except Exception:  # noqa: BLE001 — results may not be loaded for some sessions.
+        return empty
+    if not isinstance(res, pd.DataFrame) or res.empty:
+        return empty
+
+    def col(name):
+        return res[name] if name in res.columns else pd.Series(index=res.index, dtype="object")
+
+    out = pd.DataFrame(
+        {
+            "Driver": col("Abbreviation"),
+            "Team": col("TeamName"),
+            "Grid": pd.to_numeric(col("GridPosition"), errors="coerce"),
+            "Finish": pd.to_numeric(col("Position"), errors="coerce"),
+            "Status": col("Status"),
+            "Points": pd.to_numeric(col("Points"), errors="coerce"),
+        }
+    )
+    out["Gained"] = out["Grid"] - out["Finish"]
+    return out.sort_values("Finish", na_position="last").reset_index(drop=True)
+
+
+def race_highlights(session) -> dict:
+    """Headline outcomes for the Race Summary view.
+
+    Returns a dict with ``winner``, ``fastest_lap``, ``most_gained``,
+    ``most_lost`` (each a ``{driver, detail}`` dict or ``None``), a ``podium`` and
+    ``dnf`` driver list, and a ``story`` — a few plain-language sentences
+    summarising the race. Movers are computed among *classified finishers* so a
+    retirement doesn't masquerade as the biggest loser; DNFs get their own line.
+    """
+    out: dict = {
+        "winner": None,
+        "fastest_lap": None,
+        "most_gained": None,
+        "most_lost": None,
+        "podium": [],
+        "dnf": [],
+        "story": [],
+    }
+
+    fl = _fastest_lap(session)
+    if fl:
+        out["fastest_lap"] = {
+            "driver": fl["driver"],
+            "detail": f"{fl['time']} on lap {fl['lap']}",
+        }
+
+    df = race_results(session)
+    if df.empty:
+        if out["fastest_lap"]:
+            out["story"].append(
+                f"Fastest lap: {fl['driver']} ({out['fastest_lap']['detail']})."
+            )
+        return out
+
+    # A grid column with real values means this is a race/sprint (grid → finish);
+    # without it (qualifying/practice) we soften the wording accordingly.
+    race_like = bool(df["Grid"].notna().any())
+
+    # Winner
+    winner_row = df[df["Finish"] == 1]
+    winner = winner_row.iloc[0] if not winner_row.empty else None
+    if winner is not None:
+        bits = []
+        if pd.notna(winner["Grid"]):
+            bits.append("from pole" if winner["Grid"] == 1 else f"from P{int(winner['Grid'])}")
+        if pd.notna(winner["Points"]):
+            bits.append(f"{int(winner['Points'])} pts")
+        out["winner"] = {"driver": winner["Driver"], "detail": " • ".join(bits)}
+
+    # Podium
+    out["podium"] = (
+        df[df["Finish"].isin([1, 2, 3])].sort_values("Finish")["Driver"].tolist()
+    )
+
+    # Biggest mover / faller among classified finishers with a known grid slot.
+    classified = df[df["Status"].apply(_is_classified) & df["Gained"].notna()]
+    gainer = loser = None
+    if not classified.empty:
+        gainer = classified.loc[classified["Gained"].idxmax()]
+        loser = classified.loc[classified["Gained"].idxmin()]
+        if gainer["Gained"] > 0:
+            out["most_gained"] = {
+                "driver": gainer["Driver"],
+                "detail": f"+{int(gainer['Gained'])} · P{int(gainer['Grid'])}→P{int(gainer['Finish'])}",
+            }
+        if loser["Gained"] < 0:
+            out["most_lost"] = {
+                "driver": loser["Driver"],
+                "detail": f"{int(loser['Gained'])} · P{int(loser['Grid'])}→P{int(loser['Finish'])}",
+            }
+
+    # DNFs
+    out["dnf"] = df[~df["Status"].apply(_is_classified)]["Driver"].tolist()
+
+    # Plain-language story
+    story: list[str] = []
+    if out["winner"]:
+        line = f"{winner['Driver']} won the race" if race_like else f"{winner['Driver']} finished on top"
+        if race_like and pd.notna(winner["Grid"]):
+            line += " from pole" if winner["Grid"] == 1 else f" from P{int(winner['Grid'])}"
+        if out["fastest_lap"] and out["fastest_lap"]["driver"] == winner["Driver"]:
+            line += ", and set the fastest lap"
+        story.append(line + ".")
+    if out["podium"]:
+        label = "Podium" if race_like else "Top three"
+        story.append(f"{label}: " + ", ".join(out["podium"]) + ".")
+    if gainer is not None and out["most_gained"]:
+        n = int(gainer["Gained"])
+        story.append(
+            f"Biggest climber: {gainer['Driver']}, up {n} "
+            f"{'place' if n == 1 else 'places'} "
+            f"(P{int(gainer['Grid'])} to P{int(gainer['Finish'])})."
+        )
+    if loser is not None and out["most_lost"]:
+        n = abs(int(loser["Gained"]))
+        story.append(
+            f"Toughest run: {loser['Driver']}, down {n} "
+            f"{'place' if n == 1 else 'places'} "
+            f"(P{int(loser['Grid'])} to P{int(loser['Finish'])})."
+        )
+    if out["fastest_lap"] and (
+        not out["winner"] or out["fastest_lap"]["driver"] != out["winner"]["driver"]
+    ):
+        story.append(
+            f"Fastest lap: {out['fastest_lap']['driver']} "
+            f"({out['fastest_lap']['detail']})."
+        )
+    if out["dnf"]:
+        n = len(out["dnf"])
+        if n <= 5:
+            story.append(f"{n} did not finish: {', '.join(out['dnf'])}.")
+        else:
+            story.append(f"{n} cars failed to finish.")
+    out["story"] = story
+    return out
