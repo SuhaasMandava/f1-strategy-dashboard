@@ -367,6 +367,27 @@ def _load_into_state(year: int, race: str, session_label: str) -> None:
 # ---------------------------------------------------------------------------
 # Views (data logic unchanged — only wrapped in the new card/eyebrow structure)
 # ---------------------------------------------------------------------------
+# Preferred default drivers for the pickers, in priority order (Hamilton,
+# Verstappen). Falls back to whoever's available when they aren't in a session.
+_PREFERRED_DEFAULT_DRIVERS = ["HAM", "VER"]
+
+
+def _default_drivers(drivers: list[str], count: int = 2) -> list[str]:
+    """Pick ``count`` default drivers, preferring HAM and VER when present.
+
+    Any preferred driver missing from this session (e.g. a season they didn't
+    race) is simply skipped, and the selection is padded with the first available
+    drivers so the pickers always have a sensible, distinct default.
+    """
+    chosen = [d for d in _PREFERRED_DEFAULT_DRIVERS if d in drivers]
+    for driver in drivers:
+        if len(chosen) >= count:
+            break
+        if driver not in chosen:
+            chosen.append(driver)
+    return chosen[:count]
+
+
 def render_lap_times(session) -> None:
     """Lap-time line chart with a driver multiselect."""
     section_header(
@@ -381,7 +402,7 @@ def render_lap_times(session) -> None:
 
     with st.container(border=True):
         card_title("Lap-time trace")
-        default = drivers[: min(3, len(drivers))]
+        default = _default_drivers(drivers, 2)
         chosen = st.multiselect(
             "Drivers", drivers, default=default, key="laptime_drivers"
         )
@@ -461,10 +482,14 @@ def render_undercut_overcut(session) -> None:
 
     with st.container(border=True):
         card_title("Lap-time delta")
+        defaults = _default_drivers(drivers, 2)
         col_a, col_b = st.columns(2)
-        driver_a = col_a.selectbox("Driver A", drivers, index=0, key="delta_a")
-        default_b = 1 if drivers[1] != driver_a else 0
-        driver_b = col_b.selectbox("Driver B", drivers, index=default_b, key="delta_b")
+        driver_a = col_a.selectbox(
+            "Driver A", drivers, index=drivers.index(defaults[0]), key="delta_a"
+        )
+        driver_b = col_b.selectbox(
+            "Driver B", drivers, index=drivers.index(defaults[1]), key="delta_b"
+        )
 
         if driver_a == driver_b:
             st.info("Pick two different drivers to compare.")
