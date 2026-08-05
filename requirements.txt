@@ -1,8 +1,10 @@
 # Pinned minimum versions so builds are reproducible.
 # Keep this list minimal — add a dependency only with a clear reason.
-# 1.39+ is required for st-key CSS classes (used to scope the custom nav styling)
-# and column vertical_alignment used by the header layout.
-streamlit>=1.39.0
+# 1.39+ gives st-key CSS classes (used to scope the custom nav styling) and
+# column vertical_alignment. 1.46+ is required because the sidebar expand button
+# moved into header > stToolbar and was renamed stExpandSidebarButton; the chrome
+# CSS in app.py targets that DOM, so pinning here keeps it to one generation.
+streamlit>=1.46.0
 fastf1>=3.4.0
 plotly>=5.22.0
 pandas>=2.2.0

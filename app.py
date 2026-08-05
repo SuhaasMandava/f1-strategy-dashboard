@@ -94,19 +94,53 @@ _HEAD = """
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@1&display=swap');
 
-  /* ---- Hide Streamlit default chrome ---- */
-  #MainMenu { visibility: hidden; }
+  /* ---- Hide Streamlit default chrome ----
+     CRITICAL: never `display: none` the header OR the toolbar. Since Streamlit
+     1.46 the sidebar expand ("»") button is rendered at
+     header[stHeader] > [stToolbar] > … > button[stExpandSidebarButton],
+     so hiding either container makes a collapsed sidebar impossible to reopen —
+     and Streamlit auto-collapses the sidebar below 768px, which would leave the
+     app unusable on phones. Instead keep both in the DOM, make the header
+     invisible and click-through, and hide only the right-hand chrome widgets. */
+  header[data-testid="stHeader"] {
+    background: transparent !important; box-shadow: none !important;
+    pointer-events: none;                 /* let clicks pass through to the page */
+  }
+  /* …except its interactive bits, which must stay clickable. */
+  header[data-testid="stHeader"] button,
+  header[data-testid="stHeader"] a { pointer-events: auto; }
+
+  /* Right-hand chrome only — never the toolbar container itself. */
+  #MainMenu, [data-testid="stMainMenu"] { display: none; }
+  [data-testid="stStatusWidget"] { display: none; }
+  [data-testid="stAppDeployButton"] { display: none; }
+  [data-testid="stDecoration"] { display: none; }   /* pre-1.46 only; harmless now */
   footer { visibility: hidden; }
-  header[data-testid="stHeader"] { display: none; }
-  [data-testid="stToolbar"] { display: none; }
-  [data-testid="stDecoration"] { display: none; }
+
+  /* Keep the sidebar expand/collapse controls visible and clickable. Both DOM
+     generations are listed: stSidebarCollapsedControl on 1.39–1.45,
+     stExpandSidebarButton on 1.46+. An unmatched selector is harmless. */
+  [data-testid="stSidebarCollapsedControl"],
+  [data-testid="stExpandSidebarButton"],
+  [data-testid="stSidebarCollapseButton"] {
+    display: flex !important; visibility: visible !important; opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+  [data-testid="stSidebarCollapsedControl"] button,
+  [data-testid="stExpandSidebarButton"],
+  [data-testid="stSidebarCollapseButton"] button {
+    color: #d4d4d4 !important; background: #141414 !important;
+    border: 1px solid #262626 !important; border-radius: 8px !important;
+  }
 
   /* ---- Base typography / page ---- */
   html, body, .stApp, [class*="css"] {
     font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   }
   .stApp { background: #0a0a0a; }
-  .block-container { padding-top: 2.25rem; padding-bottom: 4rem; max-width: 1180px; }
+  /* padding-top clears the (now transparent) header so the sidebar expand
+     control can never overlap the wordmark. */
+  .block-container { padding-top: 3rem; padding-bottom: 4rem; max-width: 1180px; }
   .stApp p, .stApp li { color: #8a8a8a; line-height: 1.7; }
   .stApp a { color: #d4d4d4; }
 
@@ -150,9 +184,10 @@ _HEAD = """
   }
 
   /* ---- Stat cards ---- */
-  .stat-row { display: flex; gap: 1rem; margin: 0 0 3rem; }
+  /* Wraps to 2x2 on tablet and a single column on phones (see media queries). */
+  .stat-row { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0 0 3rem; }
   .stat-card {
-    flex: 1 1 0; border: 1px solid #262626; border-radius: 12px;
+    flex: 1 1 170px; border: 1px solid #262626; border-radius: 12px;
     background: linear-gradient(180deg, #161616 0%, #121212 100%);
     padding: 1.5rem 1.5rem;
   }
@@ -254,6 +289,68 @@ _HEAD = """
 
   /* ---- Dataframe: match the card border ---- */
   [data-testid="stDataFrame"] { border: 1px solid #262626; border-radius: 10px; }
+
+  /* Wide tables/blocks scroll inside themselves rather than the page. */
+  [data-testid="stDataFrame"] > div { overflow-x: auto; }
+
+  /* =====================================================================
+     RESPONSIVE — tablet and mobile
+     Streamlit stacks st.columns vertically on narrow viewports. That's right
+     for the driver pickers, but it would turn the 5-item nav into 5 full-width
+     rows, so the nav is explicitly re-flowed into a wrapping row of text links.
+     ===================================================================== */
+
+  /* ---- Tablet and below ---- */
+  @media (max-width: 900px) {
+    .block-container { padding-top: 3.25rem; padding-bottom: 2.5rem; }
+
+    /* Nav: wrap as inline links instead of one stacked row per item.
+       The second selector picks only the leaf nav columns (those containing a
+       nav button but no further nested column), so the outer wordmark/nav
+       split is left alone. */
+    [data-testid="stHorizontalBlock"]:has(div[class*="st-key-nav"]) {
+      flex-wrap: wrap !important;
+      gap: 0.55rem 1.15rem !important;
+    }
+    [data-testid="stColumn"]:has(div[class*="st-key-nav"]):not(:has([data-testid="stColumn"])) {
+      flex: 0 0 auto !important; width: auto !important; min-width: 0 !important;
+    }
+
+    /* Cards: trim padding and the big desktop gaps. */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+      padding: 1.15rem 1.1rem; margin-bottom: 2rem;
+    }
+    .stat-card { padding: 1.15rem 1.15rem; }
+    .stat-value { font-size: 1.6rem; }
+    .section-title { font-size: 1.28rem; }
+    .intro { margin-top: 1.1rem; }
+  }
+
+  /* ---- Phones ---- */
+  @media (max-width: 640px) {
+    .block-container { padding-left: 1rem; padding-right: 1rem; padding-top: 3.5rem; }
+
+    /* One stat card per row — four across is unreadable at this width. */
+    .stat-card { flex: 1 1 100%; padding: 1rem 1.15rem; }
+    .stat-row { gap: 0.65rem; margin-bottom: 2rem; }
+    .stat-value { font-size: 1.45rem; }
+
+    /* Highlight cards also go full width. */
+    .hl-card { flex: 1 1 100%; }
+
+    .intro { font-size: 0.92rem; }
+    .intro .accent { font-size: 1.12rem; }
+    .section-title { font-size: 1.15rem; }
+    .section-sub, .chart-what { font-size: 0.86rem; }
+    .wordmark { font-size: 0.86rem; }
+
+    /* Let long nav labels wrap rather than overflow the viewport. */
+    div[class*="st-key-nav"] button { white-space: normal !important; font-size: 0.75rem !important; }
+
+    [data-testid="stVerticalBlockBorderWrapper"] { padding: 1rem 0.9rem; }
+    .chart-summary { padding: 0.8rem 0.9rem; }
+    .chart-summary li { font-size: 0.85rem; }
+  }
 </style>
 """
 
