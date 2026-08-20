@@ -234,6 +234,23 @@ _HEAD = """
   .chart-summary ul { margin: 0; padding-left: 1.15rem; }
   .chart-summary li { color: #c4c4c4; font-size: 0.9rem; line-height: 1.7; margin-bottom: 0.15rem; }
 
+  /* ---- Session-loading skeleton (shown in place of a bare spinner) ---- */
+  @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+  .skeleton-label {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 0.78rem; color: #8a8a8a; letter-spacing: 0.02em; margin: 0 0 1rem;
+  }
+  .skeleton-card, .skeleton-block {
+    border: 1px solid #262626; border-radius: 12px;
+    background: linear-gradient(90deg, #141414 25%, #1c1c1c 37%, #141414 63%);
+    background-size: 400px 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+  .skeleton-row { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0 0 1rem; }
+  .skeleton-card { flex: 1 1 170px; height: 88px; }
+  .skeleton-block { height: 260px; }
+  .skeleton-wrap { margin-bottom: 2.5rem; }
+
   /* ---- Compound legend chip row (Tire Strategy) ---- */
   .compound-legend { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0 0 1.15rem; }
   .compound-chip {
@@ -553,17 +570,35 @@ def render_sidebar() -> None:
         st.sidebar.success(f"Loaded: {loaded}")
 
 
+def _skeleton_html(label: str) -> str:
+    """Ghost stat-cards + a ghost chart card, shimmering while a session loads."""
+    ghost_cards = "".join('<div class="skeleton-card"></div>' for _ in range(4))
+    return (
+        '<div class="skeleton-wrap">'
+        f'<div class="skeleton-label">{label}</div>'
+        f'<div class="skeleton-row">{ghost_cards}</div>'
+        '<div class="skeleton-block"></div>'
+        "</div>"
+    )
+
+
 def _load_into_state(year: int, race: str, session_label: str) -> None:
     """Load a session, storing it (or a clean error) in ``st.session_state``."""
-    with st.spinner(f"Loading {session_label} — {race} {year}…"):
-        try:
-            session = load_session(year, race, session_label)
-        except DataLoadError as err:
-            for key in ("session", "loaded_meta", "load_year"):
-                st.session_state.pop(key, None)
-            st.session_state["load_error"] = str(err)
-            return
+    placeholder = st.empty()
+    placeholder.markdown(
+        _skeleton_html(f"Loading {session_label} — {race} {year}…"),
+        unsafe_allow_html=True,
+    )
+    try:
+        session = load_session(year, race, session_label)
+    except DataLoadError as err:
+        for key in ("session", "loaded_meta", "load_year"):
+            st.session_state.pop(key, None)
+        st.session_state["load_error"] = str(err)
+        placeholder.empty()
+        return
 
+    placeholder.empty()
     st.session_state["session"] = session
     st.session_state["loaded_meta"] = f"{race} {year} — {session_label}"
     st.session_state["load_year"] = year
