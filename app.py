@@ -32,7 +32,10 @@ Reliability notes:
 
 from __future__ import annotations
 
+import json
+
 import streamlit as st
+import streamlit.components.v1 as components
 
 from utils import charts
 from utils.data_loader import (
@@ -456,6 +459,62 @@ def render_topbar(active_view: str) -> None:
                 if st.button(label, key=key):
                     st.session_state["view"] = slug
                     st.rerun()
+
+
+def inject_keyboard_shortcuts() -> None:
+    """Bind ←/→ (previous/next view) and 1-{n} (jump to view) globally.
+
+    Rendered as a zero-height component so its <script> actually executes
+    (scripts inside st.markdown are stripped by Streamlit's Markdown parser).
+    The component lives in its own iframe, so the listener is bound on
+    ``window.parent.document`` — the real page — and guarded with a flag on
+    that document so a rerun's fresh iframe doesn't stack duplicate listeners
+    on every rerun.
+    """
+    slugs = [slug for slug, _ in VIEWS]
+    slugs_json = json.dumps(slugs)
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            const slugs = {slugs_json};
+            const doc = window.parent.document;
+            function clickSlug(slug) {{
+                const btn = doc.querySelector(
+                    'div[class*="st-key-nav-' + slug + '"] button, '
+                    + 'div[class*="st-key-navon-' + slug + '"] button'
+                );
+                if (btn) btn.click();
+            }}
+            function activeIndex() {{
+                const el = doc.querySelector('div[class*="st-key-navon-"]');
+                if (!el) return 0;
+                const cls = [...el.classList].find(c => c.startsWith('st-key-navon-'));
+                const slug = cls ? cls.replace('st-key-navon-', '') : slugs[0];
+                const i = slugs.indexOf(slug);
+                return i === -1 ? 0 : i;
+            }}
+            if (doc.__f1NavShortcutsBound) return;
+            doc.__f1NavShortcutsBound = true;
+            doc.addEventListener('keydown', function(e) {{
+                if (e.ctrlKey || e.metaKey || e.altKey) return;
+                const tag = ((e.target && e.target.tagName) || '').toLowerCase();
+                if (tag === 'input' || tag === 'textarea' || (e.target && e.target.isContentEditable)) return;
+                if (e.key === 'ArrowRight') {{
+                    clickSlug(slugs[(activeIndex() + 1) % slugs.length]);
+                }} else if (e.key === 'ArrowLeft') {{
+                    clickSlug(slugs[(activeIndex() - 1 + slugs.length) % slugs.length]);
+                }} else if (e.key >= '1' && e.key <= '9') {{
+                    const idx = parseInt(e.key, 10) - 1;
+                    if (idx < slugs.length) clickSlug(slugs[idx]);
+                }}
+            }});
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
 
 
 def render_intro() -> None:
@@ -927,6 +986,7 @@ def render_footer() -> None:
 
 def main() -> None:
     inject_head()
+    inject_keyboard_shortcuts()
     render_sidebar()
 
     view = st.session_state.setdefault("view", "race-summary")
