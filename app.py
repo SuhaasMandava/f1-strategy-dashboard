@@ -110,6 +110,12 @@ _HEAD = """
   /* …except its interactive bits, which must stay clickable. */
   header[data-testid="stHeader"] button,
   header[data-testid="stHeader"] a { pointer-events: auto; }
+  /* The toolbar (deploy button/main menu) sets its own pointer-events: auto
+     regardless of the header rule above, so — now that the topbar nav sits in
+     the same top-right corner as a sticky element — its (invisible, hidden)
+     hit area was silently swallowing nav clicks. Everything inside it is
+     already hidden, so there's nothing left to interact with. */
+  [data-testid="stToolbar"] { pointer-events: none; }
 
   /* Right-hand chrome only — never the toolbar container itself. */
   #MainMenu, [data-testid="stMainMenu"] { display: none; }
@@ -233,6 +239,23 @@ _HEAD = """
   }
   .chart-summary ul { margin: 0; padding-left: 1.15rem; }
   .chart-summary li { color: #c4c4c4; font-size: 0.9rem; line-height: 1.7; margin-bottom: 0.15rem; }
+
+  /* ---- Sticky topbar: nav stays reachable on long-scrolling views ----
+     `position: sticky` is constrained by its element's *immediate* containing
+     block. Streamlit wraps every st.container() in its own shrink-to-fit
+     [data-testid="stLayoutWrapper"] div, so applying sticky to the topbar's own
+     div gives it a containing block no taller than the topbar itself — no room
+     to stick. Applying it one level up, to that wrapper (whose own parent is
+     the full-height page column), gives it the room it needs. */
+  [data-testid="stLayoutWrapper"]:has(> div[class*="st-key-topbar"]) {
+    position: sticky; top: 0; z-index: 999;
+  }
+  div[class*="st-key-topbar"] {
+    background: rgba(10, 10, 10, 0.88); backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    padding: 0.7rem 0; margin: -0.7rem 0 0;
+    border-bottom: 1px solid transparent;
+  }
 
   /* ---- Session-loading skeleton (shown in place of a bare spinner) ---- */
   @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
@@ -880,7 +903,8 @@ def main() -> None:
     view = st.session_state.setdefault("view", "race-summary")
     session = st.session_state.get("session")
 
-    render_topbar(view)
+    with st.container(key="topbar"):
+        render_topbar(view)
     render_intro()
     render_stat_row(session)
 
