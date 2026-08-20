@@ -41,6 +41,7 @@ from utils.data_loader import (
     DataLoadError,
     available_years,
     delta_summary,
+    driver_color_map,
     driver_list,
     enable_cache,
     event_names,
@@ -288,6 +289,20 @@ _HEAD = """
     border: 1px solid rgba(255,255,255,0.25);
   }
 
+  /* ---- Driver color-swatch chips (team-color tag next to a driver pick) ---- */
+  .driver-chip-row { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0.9rem 0 0; }
+  .driver-chip {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    border: 1px solid #262626; border-radius: 999px; background: #101010;
+    padding: 0.3rem 0.75rem 0.3rem 0.55rem;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 0.72rem; letter-spacing: 0.04em; color: #c4c4c4;
+  }
+  .driver-swatch {
+    width: 10px; height: 10px; border-radius: 50%; flex: none;
+    border: 1px solid rgba(255,255,255,0.25);
+  }
+
   /* ---- Race Summary highlight cards ---- */
   .hl-grid { display: flex; gap: 1rem; flex-wrap: wrap; margin: 0.3rem 0 1.5rem; }
   .hl-card {
@@ -523,6 +538,16 @@ def compound_legend(compounds: list[str]) -> None:
         for c in ordered
     )
     st.markdown(f'<div class="compound-legend">{chips}</div>', unsafe_allow_html=True)
+
+
+def driver_chips(colors: dict[str, str]) -> None:
+    """Row of team-color swatch chips, one per driver, keyed by abbreviation."""
+    chips = "".join(
+        f'<span class="driver-chip"><span class="driver-swatch" '
+        f'style="background:{color}"></span>{driver}</span>'
+        for driver, color in colors.items()
+    )
+    st.markdown(f'<div class="driver-chip-row">{chips}</div>', unsafe_allow_html=True)
 
 
 # Plain-terms "what this chart shows" copy, paired with a dynamic summary that's
@@ -761,7 +786,9 @@ def render_lap_times(session) -> None:
             st.info("Select at least one driver to plot lap times.")
             return
         st.plotly_chart(
-            charts.lap_time_chart(lap_times(session, chosen)),
+            charts.lap_time_chart(
+                lap_times(session, chosen), driver_color_map(session, chosen)
+            ),
             use_container_width=True,
         )
         chart_notes("lap-times", lap_time_summary(session, chosen))
@@ -845,6 +872,8 @@ def render_undercut_overcut(session) -> None:
         if driver_a == driver_b:
             st.info("Pick two different drivers to compare.")
             return
+
+        driver_chips(driver_color_map(session, [driver_a, driver_b]))
 
         df = lap_time_delta(session, driver_a, driver_b)
         if df.empty:

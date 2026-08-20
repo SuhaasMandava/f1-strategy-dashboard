@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 
 import fastf1
+import fastf1.plotting
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
@@ -226,6 +227,24 @@ def driver_list(session) -> list[str]:
     if not _has_columns(laps, {"Driver"}):
         return []
     return sorted(laps["Driver"].dropna().unique().tolist())
+
+
+_FALLBACK_DRIVER_COLOR = "#8C8C8C"
+
+
+def driver_color_map(session, drivers: list[str]) -> dict[str, str]:
+    """Each driver's team color, keyed by abbreviation, for chart line/marker tints.
+
+    Falls back to a neutral gray for any driver FastF1 can't resolve (e.g. an
+    unrecognized abbreviation), so a lookup miss never breaks a chart.
+    """
+    colors: dict[str, str] = {}
+    for driver in drivers:
+        try:
+            colors[driver] = fastf1.plotting.get_driver_color(driver, session=session)
+        except Exception:  # noqa: BLE001 — any lookup failure just falls back.
+            colors[driver] = _FALLBACK_DRIVER_COLOR
+    return colors
 
 
 def lap_times(session, drivers: list[str]) -> pd.DataFrame:

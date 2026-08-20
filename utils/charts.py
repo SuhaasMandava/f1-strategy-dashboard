@@ -87,23 +87,30 @@ def _empty_figure(message: str) -> go.Figure:
     return fig
 
 
-def lap_time_chart(df: pd.DataFrame) -> go.Figure:
+def lap_time_chart(
+    df: pd.DataFrame, driver_colors: dict[str, str] | None = None
+) -> go.Figure:
     """Line chart of lap time vs lap number, one colored line per driver.
 
-    Expects columns ``Driver``, ``LapNumber``, ``LapTimeSeconds``.
+    Expects columns ``Driver``, ``LapNumber``, ``LapTimeSeconds``. ``driver_colors``
+    maps abbreviation -> hex color (see ``utils.data_loader.driver_color_map``); a
+    driver missing from it falls back to Plotly's default color cycle.
     """
     if df.empty:
         return _empty_figure("No lap-time data for the selected drivers.")
 
+    driver_colors = driver_colors or {}
     fig = go.Figure()
     for driver, laps in df.groupby("Driver"):
+        color = driver_colors.get(driver)
         fig.add_trace(
             go.Scatter(
                 x=laps["LapNumber"],
                 y=laps["LapTimeSeconds"],
                 mode="lines+markers",
                 name=driver,
-                marker=dict(size=5),
+                line=dict(color=color) if color else {},
+                marker=dict(size=5, color=color) if color else dict(size=5),
                 customdata=[_format_seconds(s) for s in laps["LapTimeSeconds"]],
                 hovertemplate=(
                     f"<b>{driver}</b><br>Lap %{{x}}<br>%{{customdata}}<extra></extra>"
