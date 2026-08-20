@@ -36,6 +36,7 @@ import streamlit as st
 
 from utils import charts
 from utils.data_loader import (
+    COMPOUND_COLORS,
     SESSION_TYPES,
     DataLoadError,
     available_years,
@@ -232,6 +233,20 @@ _HEAD = """
   }
   .chart-summary ul { margin: 0; padding-left: 1.15rem; }
   .chart-summary li { color: #c4c4c4; font-size: 0.9rem; line-height: 1.7; margin-bottom: 0.15rem; }
+
+  /* ---- Compound legend chip row (Tire Strategy) ---- */
+  .compound-legend { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0 0 1.15rem; }
+  .compound-chip {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    border: 1px solid #262626; border-radius: 999px; background: #101010;
+    padding: 0.3rem 0.75rem 0.3rem 0.55rem;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 0.72rem; letter-spacing: 0.04em; color: #c4c4c4;
+  }
+  .compound-swatch {
+    width: 10px; height: 10px; border-radius: 50%; flex: none;
+    border: 1px solid rgba(255,255,255,0.25);
+  }
 
   /* ---- Race Summary highlight cards ---- */
   .hl-grid { display: flex; gap: 1rem; flex-wrap: wrap; margin: 0.3rem 0 1.5rem; }
@@ -451,6 +466,23 @@ def section_header(slug: str, title: str, subtitle: str = "") -> None:
 def card_title(text: str) -> None:
     """Small bold card header (used inside content cards, not st.header)."""
     st.markdown(f'<div class="card-title">{text}</div>', unsafe_allow_html=True)
+
+
+# Canonical display order for the compound legend — race order, not alphabetical.
+_COMPOUND_ORDER = ["SOFT", "MEDIUM", "HARD", "INTERMEDIATE", "WET"]
+
+
+def compound_legend(compounds: list[str]) -> None:
+    """Row of colored chips keying each tire compound actually used in this stint data."""
+    ordered = [c for c in _COMPOUND_ORDER if c in compounds]
+    ordered += [c for c in compounds if c not in ordered]  # any UNKNOWN, appended last
+    chips = "".join(
+        f'<span class="compound-chip">'
+        f'<span class="compound-swatch" style="background:{COMPOUND_COLORS.get(c, COMPOUND_COLORS["UNKNOWN"])}">'
+        f"</span>{c.title()}</span>"
+        for c in ordered
+    )
+    st.markdown(f'<div class="compound-legend">{chips}</div>', unsafe_allow_html=True)
 
 
 # Plain-terms "what this chart shows" copy, paired with a dynamic summary that's
@@ -691,6 +723,7 @@ def render_tire_strategy(session) -> None:
 
     with st.container(border=True):
         card_title("Stint timeline")
+        compound_legend(df["Compound"].unique().tolist())
         st.plotly_chart(charts.tire_strategy_chart(df), use_container_width=True)
         chart_notes("tire-strategy", tire_strategy_summary(session))
 
